@@ -57,8 +57,8 @@ function useVirtualList(items, containerRef, estimate = 220) {
     while (low < high) { const middle = Math.floor((low + high) / 2); if (prefix[middle] < value) low = middle + 1; else high = middle }
     return Math.max(0, low - 1)
   }, [prefix])
-  const start = Math.max(0, find(scrollTop) - 3)
-  const end = Math.min(items.length, find(scrollTop + viewport) + 4)
+  const start = items.length ? Math.max(0, Math.min(items.length - 1, find(scrollTop) - 3)) : 0
+  const end = items.length ? Math.max(start + 1, Math.min(items.length, find(scrollTop + Math.max(viewport, 1)) + 4)) : 0
   const measure = useCallback((index, height) => {
     const old = heights.current[index] || estimate
     if (Math.abs(old - height) < 1) return
