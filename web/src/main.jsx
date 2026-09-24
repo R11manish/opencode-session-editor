@@ -22,6 +22,7 @@ function useVirtualList(items, containerRef, estimate = 220) {
   const [version, setVersion] = useState(0)
   const [viewport, setViewport] = useState(600)
   const [scrollTop, setScrollTop] = useState(0)
+  const followBottom = useRef(true)
   const frame = useRef(0)
 
   useEffect(() => {
@@ -34,6 +35,8 @@ function useVirtualList(items, containerRef, estimate = 220) {
     if (!node) return undefined
     const resize = () => setViewport(node.clientHeight)
     const scroll = () => {
+      const distance = node.scrollHeight - node.scrollTop - node.clientHeight
+      followBottom.current = distance < 40
       if (frame.current) return
       frame.current = requestAnimationFrame(() => { frame.current = 0; setScrollTop(node.scrollTop) })
     }
@@ -62,10 +65,11 @@ function useVirtualList(items, containerRef, estimate = 220) {
     const node = containerRef.current
     const before = prefix[index]
     heights.current[index] = height
-    if (node && before < node.scrollTop) node.scrollTop += height - old
+    if (node && followBottom.current) node.scrollTop = node.scrollHeight
+    else if (node && before < node.scrollTop) node.scrollTop += height - old
     setVersion(value => value + 1)
   }, [containerRef, estimate, prefix])
-  return { prefix, start, end, measure, totalHeight: prefix.at(-1) || 0 }
+  return { prefix, start, end, measure, totalHeight: prefix.at(-1) || 0, followBottom }
 }
 
 const Part = memo(function Part({ part, messageRole, selected, onSelect }) {
@@ -94,8 +98,9 @@ function Timeline({ document, selected, onSelect, searchQuery, onSearchChange, o
   useLayoutEffect(() => {
     const node = container.current
     if (!node || !items.length) return undefined
-    const frame = requestAnimationFrame(() => { node.scrollTop = node.scrollHeight })
-    return () => cancelAnimationFrame(frame)
+    virtual.followBottom.current = true
+    const timer = setTimeout(() => node.scrollTo({ top: node.scrollHeight }), 50)
+    return () => clearTimeout(timer)
   }, [document?.session?.id, items.length])
   const matches = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
@@ -126,6 +131,7 @@ function App() {
   const [editor, setEditor] = useState("")
   const [status, setStatus] = useState("")
   const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const selectedValue = useMemo(() => { if (!sessionDocument || !selected) return null; if (selected.kind === "message") return sessionDocument.messages.find(item => item.id === selected.id); return sessionDocument.messages.flatMap(item => item.parts).find(item => item.id === selected.id) }, [sessionDocument, selected])
 
   const loadSessions = useCallback(async () => { const body = await request(`/api/sessions?q=${encodeURIComponent(search)}`); setSessions(body.sessions || []) }, [search])
@@ -140,8 +146,8 @@ function App() {
   const matchMove = direction => { if (typeof direction === "object") { setMatchController(direction); return } if (!matchController?.matches?.length) return; const next = (matchIndex + (direction === "next" ? 1 : -1) + matchController.matches.length) % matchController.matches.length; setMatchIndex(next); matchController.scrollTo(matchController.matches[next]) }
   const selectedType = selectedValue && type(selectedValue)
   return <div className="app">
-    <aside className="sidebar"><div className="brand"><h1>OpenCode Session Editor</h1><p>Local OpenCode database</p></div><input className="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /><div className="session-list">{sessions.map(item => <div className={`session ${item.id === sessionId ? "active" : ""}`} key={item.id} onClick={() => loadSession(item.id)}><div className="session-title">{item.title || item.id}</div><div className="session-meta">{item.directory} · {new Date(item.updated).toLocaleString()}</div></div>)}</div></aside>
-    <main className="main"><div className="toolbar"><h2>{sessionDocument?.session?.title || "Select a session"}</h2><span className={`mode ${editing ? "" : "source"}`}>{editing ? "EDITING" : "BROWSE"}</span><button className="button" disabled={!sessionDocument || editing} onClick={startEditing}>Start editing</button><button className="button primary" disabled={!editing} onClick={apply}>Apply</button><button className="button" disabled={!editing}>Undo</button><button className="button" disabled={!editing}>Redo</button><button className="button" onClick={() => setInspectorOpen(value => !value)}>Inspector</button></div><Timeline document={sessionDocument} selected={selected} onSelect={(kind, id) => { setSelected({ kind, id }); setInspectorOpen(true) }} searchQuery={messageSearch} onSearchChange={value => { setMessageSearch(value); setMatchIndex(0) }} onSearchMove={matchMove} /></main>
+    <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}><div className="brand"><h1>OpenCode Session Editor</h1><p>Local OpenCode database</p><button className="button sidebar-close" onClick={() => setSidebarOpen(false)}>Close</button></div><input className="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search sessions" /><div className="session-list">{sessions.map(item => <div className={`session ${item.id === sessionId ? "active" : ""}`} key={item.id} onClick={() => { loadSession(item.id); setSidebarOpen(false) }}><div className="session-title">{item.title || item.id}</div><div className="session-meta">{item.directory} · {new Date(item.updated).toLocaleString()}</div></div>)}</div></aside>
+    <main className="main"><div className="toolbar"><button className="button mobile-only" onClick={() => setSidebarOpen(true)}>Sessions</button><h2>{sessionDocument?.session?.title || "Select a session"}</h2><span className={`mode ${editing ? "" : "source"}`}>{editing ? "EDITING" : "BROWSE"}</span><button className="button" disabled={!sessionDocument || editing} onClick={startEditing}>Start editing</button><button className="button primary" disabled={!editing} onClick={apply}>Apply</button><button className="button" disabled={!editing}>Undo</button><button className="button" disabled={!editing}>Redo</button><button className="button" onClick={() => setInspectorOpen(value => !value)}>Inspector</button></div><Timeline document={sessionDocument} selected={selected} onSelect={(kind, id) => { setSelected({ kind, id }); setInspectorOpen(true) }} searchQuery={messageSearch} onSearchChange={value => { setMessageSearch(value); setMatchIndex(0) }} onSearchMove={matchMove} /></main>
     <aside className={`inspector ${inspectorOpen ? "open" : ""}`}><div className="inspector-head"><h3>{selectedValue ? (selected?.kind === "message" ? "Message" : "Part") : "Inspector"}</h3><p>{selectedValue?.id || "Select a message or part."}</p></div><div className="inspector-body"><label className="label">Session title</label><input className="input" disabled={!editing} value={sessionTitle} onChange={event => setSessionTitle(event.target.value)} /><div className="actions"><button className="button" disabled={!editing}>Rename</button><button className="button" disabled={!editing}>Add message</button><button className="button" disabled={!editing}>Add part</button></div><label className="label">Raw JSON</label><textarea className="editor" disabled={!selectedValue || !editing} value={editor} onChange={event => setEditor(event.target.value)} /><div className="hint">{selectedType === "reasoning" ? "Reasoning may include provider signatures or encrypted metadata." : "Workspace edits are staged locally until Apply is confirmed."}</div><div className="status">{status}</div></div><div className="footer"><button className="button" disabled={!selectedValue || !editing} onClick={saveSelected}>Save selected</button><button className="button danger" disabled={!selectedValue || !editing}>Delete selected</button></div></aside>
   </div>
 }
