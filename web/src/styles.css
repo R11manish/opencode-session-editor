@@ -46,7 +46,7 @@ button {
 
 .app {
   display: grid;
-  grid-template-columns: 300px minmax(420px, 1fr) 390px;
+  grid-template-columns: 280px minmax(0, 1fr) 380px;
   grid-template-rows: minmax(0, 1fr);
   height: 100dvh;
   max-height: 100dvh;
@@ -158,7 +158,7 @@ button {
 
 .main {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -665,6 +665,166 @@ button {
   border: 0;
   border-top: 1px solid #202835;
   text-align: left;
+  background: transparent;
+  color: var(--text);
+}
+
+.timeline-row {
+  padding: 4px 12px;
+  width: 100%;
+}
+
+.record {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  text-align: left;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.record.message {
+  background: #11161f;
+}
+.record:hover,
+.record.selected {
+  border-color: var(--blue);
+}
+.record-label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.record-label small {
+  color: var(--muted);
+}
+.record-preview {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.record.search-match {
+  border-color: #e4c17c;
+}
+.record mark {
+  background: #614f18;
+  color: #fff;
+}
+.inspector-head,
+.brand,
+.footer {
+  flex-shrink: 0;
+}
+.inspector-head p,
+.status {
+  overflow-wrap: anywhere;
+}
+.inspector-body {
+  flex: 1;
+}
+.inspector-body > * {
+  flex-shrink: 0;
+}
+.toolbar-search {
+  position: static;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin: 0;
+  max-width: none;
+}
+.toolbar-search input {
+  min-width: 0;
+}
+.main,
+.content,
+.timeline-panel,
+.toolbar-search {
+  max-width: 100%;
+}
+.session:focus-visible,
+.record:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: -2px;
+}
+
+@media (max-width: 1100px) and (min-width: 851px) {
+  .app {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .inspector {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 2;
+    width: min(440px, 90vw);
+    transform: translateX(100%);
+    visibility: hidden;
+  }
+  .inspector.open {
+    transform: translateX(0);
+    visibility: visible;
+  }
+  .inspector-close {
+    display: inline-flex;
+  }
+  .drawer-backdrop.inspector {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    transform: none;
+    visibility: visible;
+    border: 0;
+    background: #0008;
+  }
+}
+
+@media (max-width: 850px) {
+  .inspector {
+    visibility: hidden;
+  }
+  .inspector.open {
+    visibility: visible;
+  }
+}
+
+@media (max-width: 620px) {
+  .sidebar {
+    visibility: hidden;
+  }
+  .sidebar.open {
+    visibility: visible;
+  }
+  .record {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 10px;
+  }
+  .record-label {
+    flex-direction: row;
+  }
+  .toolbar-search input {
+    flex-basis: 100%;
+    font-size: 16px;
+  }
+  .field-textarea,
+  .input {
+    font-size: 16px;
+  }
+  .button {
+    min-height: 40px;
+  }
 }
 
 .session-title,

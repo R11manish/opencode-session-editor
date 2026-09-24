@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,6 +79,8 @@ func (a *API) api(w http.ResponseWriter, r *http.Request) {
 		write(w, 200, map[string]any{"sessions": v})
 	case "/api/session":
 		a.session(w, r)
+	case "/api/change":
+		a.directChange(w, r)
 	case "/api/workspace":
 		a.workspace(w, r)
 	case "/api/workspace/change":
@@ -106,7 +110,46 @@ func (a *API) session(w http.ResponseWriter, r *http.Request) {
 		failStatus(w, 404, err)
 		return
 	}
-	write(w, 200, d)
+	data, err := json.Marshal(d)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	etag := fmt.Sprintf(`"%x"`, sha256.Sum256(data))
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-cache")
+	if r.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func (a *API) directChange(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	var change opencode.Change
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 20<<20)).Decode(&change); err != nil {
+		failStatus(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := a.store.Change(r.Context(), change); err != nil {
+		switch {
+		case errors.Is(err, opencode.ErrConflict):
+			failStatus(w, http.StatusConflict, err)
+		case errors.Is(err, sql.ErrNoRows):
+			failStatus(w, http.StatusNotFound, err)
+		case errors.Is(err, opencode.ErrInvalidChange):
+			failStatus(w, http.StatusBadRequest, err)
+		default:
+			fail(w, err)
+		}
+		return
+	}
+	write(w, http.StatusOK, map[string]bool{"ok": true})
 }
 func (a *API) workspace(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {

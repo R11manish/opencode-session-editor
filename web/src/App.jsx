@@ -1,182 +1,231 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { post, request } from "./api.js";
 import Inspector from "./Inspector.jsx";
 import Timeline from "./Timeline.jsx";
 import { timelineRows } from "./timeline-data.js";
+import useLiveSession from "./useLiveSession.js";
+
+const SessionList = memo(function SessionList({
+  sessions,
+  sessionId,
+  busy,
+  onLoad,
+}) {
+  return (
+    <nav className="session-list" aria-label="Session list" tabIndex={0}>
+      {sessions.map((item) => (
+        <button
+          className={`session ${item.id === sessionId ? "active" : ""}`}
+          key={item.id}
+          disabled={busy}
+          aria-current={item.id === sessionId ? "true" : undefined}
+          onClick={() => onLoad(item.id)}
+        >
+          <span className="session-title">{item.title || item.id}</span>
+          <span className="session-meta">
+            {item.directory} · {new Date(item.updated).toLocaleString()}
+          </span>
+        </button>
+      ))}
+      {!sessions.length ? (
+        <div className="empty">No matching sessions.</div>
+      ) : null}
+    </nav>
+  );
+});
 
 export default function App() {
   const [sessions, setSessions] = useState([]);
-  const [sessionDocument, setSessionDocument] = useState(null);
-  const [editing, setEditing] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
   const [selected, setSelected] = useState(null);
   const [query, setQuery] = useState("");
-  const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [loadingId, setLoadingId] = useState("");
+  const saving = useRef(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [drawer, setDrawer] = useState(null);
-  const loadController = useRef(null);
-  const sessionId = sessionDocument?.session.id;
-  const records = useMemo(
-    () =>
-      new Map(
-        sessionDocument
-          ? timelineRows(sessionDocument).map((row) => [row.key, row])
-          : [],
-      ),
+  const dirty = useRef(false);
+  const [listRefresh, setListRefresh] = useState(0);
+  const live = useLiveSession(sessionId, busy);
+  const sessionDocument = live.document;
+  const rows = useMemo(
+    () => (sessionDocument ? timelineRows(sessionDocument) : []),
     [sessionDocument],
+  );
+  const records = useMemo(
+    () => new Map(rows.map((row) => [row.key, row])),
+    [rows],
   );
   const selectedRow = records.get(selected);
 
   useEffect(() => {
     const controller = new AbortController();
-    const timer = setTimeout(() => {
-      request(`/api/sessions?q=${encodeURIComponent(query)}`, {
-        signal: controller.signal,
-      })
-        .then((body) => {
-          if (!controller.signal.aborted) setSessions(body.sessions || []);
-        })
-        .catch((cause) => {
-          if (cause.name !== "AbortError") setError(cause.message);
-        });
-    }, 180);
+    let timer;
+    async function poll() {
+      try {
+        if (!globalThis.document.hidden) {
+          const body = await request(
+            `/api/sessions?q=${encodeURIComponent(query)}`,
+            { signal: controller.signal },
+          );
+          if (!controller.signal.aborted)
+            setSessions((current) =>
+              current.length === body.sessions?.length &&
+              current.every((item, index) => {
+                const other = body.sessions[index];
+                return (
+                  item.id === other.id &&
+                  item.title === other.title &&
+                  item.directory === other.directory &&
+                  item.updated === other.updated
+                );
+              })
+                ? current
+                : body.sessions || [],
+            );
+        }
+      } catch (cause) {
+        if (cause.name !== "AbortError") setError(cause.message);
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(poll, 5000);
+      }
+    }
+    timer = setTimeout(poll, 180);
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, refresh]);
+  }, [query, listRefresh]);
 
-  useEffect(() => () => loadController.current?.abort(), []);
   useEffect(() => {
     const close = (event) => {
       if (event.key === "Escape") setDrawer(null);
     };
+    const leaving = (event) => {
+      if (dirty.current) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
     window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
+    window.addEventListener("beforeunload", leaving);
+    return () => {
+      window.removeEventListener("keydown", close);
+      window.removeEventListener("beforeunload", leaving);
+    };
   }, []);
 
-  async function loadSession(id) {
-    if (busy) return;
-    loadController.current?.abort();
-    const controller = new AbortController();
-    loadController.current = controller;
-    setLoadingId(id);
-    setError("");
-    setDrawer(null);
-    try {
-      const body = await request(`/api/session?id=${encodeURIComponent(id)}`, {
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted) return;
-      setSessionDocument(body);
-      setEditing(false);
+  const loadSession = useCallback(
+    (id) => {
+      if (saving.current) return;
+      if (id === sessionId) {
+        setDrawer(null);
+        return;
+      }
+      if (
+        dirty.current &&
+        !window.confirm("Discard unsaved edits and open this session?")
+      )
+        return;
+      dirty.current = false;
       setSelected(null);
+      setSessionId(id);
+      setDrawer(null);
       setStatus("");
-    } catch (cause) {
-      if (cause.name !== "AbortError") setError(cause.message);
-    } finally {
-      if (!controller.signal.aborted) setLoadingId("");
-    }
-  }
+      setError("");
+    },
+    [sessionId],
+  );
 
-  async function perform(action, success) {
-    if (busy || loadingId) return;
-    setBusy(true);
-    setError("");
-    try {
-      const body = await action();
-      if (body.document) setSessionDocument(body.document);
-      setStatus(typeof success === "function" ? success(body) : success);
-      return body;
-    } catch (cause) {
-      setError(cause.message);
-    } finally {
-      setBusy(false);
-    }
-  }
+  const change = useCallback(
+    async (operation, payload) => {
+      if (saving.current || !sessionId) return;
+      saving.current = true;
+      setBusy(true);
+      setError("");
+      try {
+        const result = await post("/api/change", {
+          sessionId,
+          operation,
+          ...payload,
+        });
+        setStatus("Saved to OpenCode");
+        setListRefresh((value) => value + 1);
+        return result;
+      } catch (cause) {
+        setError(cause.message);
+      } finally {
+        saving.current = false;
+        setBusy(false);
+      }
+    },
+    [sessionId],
+  );
 
-  async function startEditing() {
-    const body = await perform(
-      () => post("/api/workspace", { sessionId }),
-      "Workspace started",
-    );
-    if (body) setEditing(true);
-  }
+  const add = useCallback(
+    async (kind) => {
+      const example =
+        kind === "part"
+          ? { type: "text", text: "" }
+          : {
+              role: "user",
+              time: { created: Date.now() },
+              agent: "build",
+              model: { providerID: "", modelID: "" },
+            };
+      const text = window.prompt(
+        `New ${kind} JSON`,
+        JSON.stringify(example, null, 2),
+      );
+      if (text === null) return;
+      try {
+        await change(`${kind}.add`, {
+          messageId: selectedRow?.messageId,
+          data: JSON.parse(text),
+        });
+      } catch (cause) {
+        setError(`Invalid JSON: ${cause.message}`);
+      }
+    },
+    [change, selectedRow?.messageId],
+  );
 
-  const change = (operation, payload) =>
-    perform(
-      () => post("/api/workspace/change", { sessionId, operation, ...payload }),
-      "Workspace updated",
-    );
-  const history = (direction) =>
-    perform(
-      () =>
-        post(
-          `/api/workspace/${direction}?sessionId=${encodeURIComponent(sessionId)}`,
-        ),
-      direction === "undo" ? "Undid last change" : "Redid last change",
-    );
-
-  async function apply() {
-    if (!window.confirm("Apply staged changes to the OpenCode database?"))
-      return;
-    const body = await perform(
-      () => post(`/api/apply?sessionId=${encodeURIComponent(sessionId)}`),
-      "Applied.",
-    );
-    if (body) {
-      setEditing(false);
-      setRefresh((value) => value + 1);
-    }
-  }
-
-  function add(kind) {
-    const example =
-      kind === "part"
-        ? { type: "text", text: "" }
-        : {
-            role: "user",
-            time: { created: Date.now() },
-            agent: "build",
-            model: { providerID: "", modelID: "" },
-          };
-    const text = window.prompt(
-      `New ${kind} JSON`,
-      JSON.stringify(example, null, 2),
-    );
-    if (text === null) return;
-    try {
-      change(`${kind}.add`, {
-        messageId: selectedRow?.messageId,
-        data: JSON.parse(text),
-      });
-    } catch (cause) {
-      setError(`Invalid JSON: ${cause.message}`);
-    }
-  }
-
-  async function remove() {
+  const remove = useCallback(async () => {
     if (
       !selectedRow ||
-      !window.confirm(
-        `Delete this ${selectedRow.kind}? You can undo before applying.`,
-      )
+      !window.confirm(`Delete this ${selectedRow.kind} from OpenCode?`)
     )
       return;
-    const body = await change(`${selectedRow.kind}.delete`, {
+    const result = await change(`${selectedRow.kind}.delete`, {
       [selectedRow.kind === "message" ? "messageId" : "partId"]:
         selectedRow.record.id,
+      before: selectedRow.data,
     });
-    if (body) setSelected(null);
-  }
+    if (result) {
+      dirty.current = false;
+      setSelected(null);
+    }
+  }, [change, selectedRow]);
 
-  const select = useCallback((key) => {
-    setSelected(key);
-    setDrawer("inspector");
+  const select = useCallback(
+    (key) => {
+      if (saving.current) return;
+      if (
+        selected !== key &&
+        dirty.current &&
+        !window.confirm("Discard unsaved edits and select another record?")
+      )
+        return;
+      if (selected !== key) dirty.current = false;
+      setSelected(key);
+      setDrawer("inspector");
+    },
+    [selected],
+  );
+  const onDirty = useCallback((value) => {
+    dirty.current = value;
   }, []);
-  const blocked = busy || Boolean(loadingId);
+  const closeInspector = useCallback(() => setDrawer(null), []);
 
   return (
     <div className="app">
@@ -194,7 +243,7 @@ export default function App() {
       >
         <div className="brand">
           <h1>OpenCode Session Editor</h1>
-          <p>Local OpenCode database</p>
+          <p>Direct editing · live updates</p>
           <button
             className="button sidebar-close"
             onClick={() => setDrawer(null)}
@@ -210,25 +259,12 @@ export default function App() {
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search sessions"
         />
-        <nav className="session-list" aria-label="Session list" tabIndex={0}>
-          {sessions.map((item) => (
-            <button
-              className={`session ${item.id === sessionId ? "active" : ""}`}
-              key={item.id}
-              disabled={busy}
-              aria-current={item.id === sessionId ? "true" : undefined}
-              onClick={() => loadSession(item.id)}
-            >
-              <span className="session-title">{item.title || item.id}</span>
-              <span className="session-meta">
-                {item.directory} · {new Date(item.updated).toLocaleString()}
-              </span>
-            </button>
-          ))}
-          {!sessions.length ? (
-            <div className="empty">No matching sessions.</div>
-          ) : null}
-        </nav>
+        <SessionList
+          sessions={sessions}
+          sessionId={sessionId}
+          busy={busy}
+          onLoad={loadSession}
+        />
       </aside>
       <main className="main">
         <div className="toolbar">
@@ -241,42 +277,28 @@ export default function App() {
             Sessions
           </button>
           <h2>{sessionDocument?.session.title || "Select a session"}</h2>
-          <span className={`mode ${editing ? "" : "source"}`}>
-            {editing ? "EDITING" : "BROWSE"}
+          <span
+            className={`mode ${live.error ? "source" : ""}`}
+            title={
+              live.syncedAt
+                ? `Content loaded ${new Date(live.syncedAt).toLocaleTimeString()}; checking for updates automatically`
+                : "Waiting for session"
+            }
+          >
+            {live.error ? "RECONNECTING" : "LIVE"}
           </span>
           <div className="toolbar-actions">
             <button
               className="button"
-              disabled={!sessionDocument || editing || blocked}
-              onClick={startEditing}
+              disabled={!sessionId || busy}
+              onClick={live.sync}
             >
-              Start editing
-            </button>
-            <button
-              className="button primary"
-              disabled={!editing || blocked}
-              onClick={apply}
-            >
-              Apply
-            </button>
-            <button
-              className="button"
-              disabled={!editing || blocked}
-              onClick={() => history("undo")}
-            >
-              Undo
-            </button>
-            <button
-              className="button"
-              disabled={!editing || blocked}
-              onClick={() => history("redo")}
-            >
-              Redo
+              Sync now
             </button>
             <button
               className="button"
               aria-controls="inspector"
-              aria-expanded={drawer === "inspector"}
+              disabled={!sessionDocument}
               onClick={() =>
                 setDrawer(drawer === "inspector" ? null : "inspector")
               }
@@ -289,39 +311,37 @@ export default function App() {
           {sessionDocument ? (
             <Timeline
               key={sessionId}
-              document={sessionDocument}
+              rows={rows}
+              messageCount={sessionDocument.messages.length}
               selected={selected}
               onSelect={select}
             />
           ) : (
             <div className="empty">
-              Select a session to inspect messages, thinking traces and tool
-              calls.
+              {live.loading
+                ? "Loading session…"
+                : "Select a session to inspect messages, thinking traces and tool calls."}
             </div>
           )}
-          {loadingId ? (
-            <div className="loading" role="status">
-              Loading session…
-            </div>
-          ) : null}
         </div>
         <div
-          className={`status ${error ? "error" : ""}`}
-          role={error ? "alert" : "status"}
+          className={`status ${error || live.error ? "error" : ""}`}
+          role={error || live.error ? "alert" : "status"}
         >
-          {error || (busy ? "Working…" : status)}
+          {error || live.error || (busy ? "Saving…" : status)}
         </div>
       </main>
       <Inspector
-        document={sessionDocument}
+        key={`${sessionId}:${selected}`}
+        sessionTitle={sessionDocument?.session.title}
         selectedRow={selectedRow}
-        editing={editing}
-        busy={blocked}
+        busy={busy}
         onChange={change}
+        onDirty={onDirty}
         onAdd={add}
         onDelete={remove}
         open={drawer === "inspector"}
-        onClose={() => setDrawer(null)}
+        onClose={closeInspector}
       />
     </div>
   );

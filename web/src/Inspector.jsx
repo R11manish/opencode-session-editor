@@ -1,132 +1,138 @@
-import { useEffect, useState } from "react";
-import { pretty } from "./timeline-data.js";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 function Field({ label, value, onChange, disabled, multiline = false }) {
   const props = {
+    id: `field-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
     value: value ?? "",
     disabled,
     onChange: (event) => onChange(event.target.value),
     className: multiline ? "field-textarea" : "input",
+    spellCheck: false,
   };
   return (
     <label className="field">
       <span>{label}</span>
-      {multiline ? <textarea {...props} rows={5} /> : <input {...props} />}
+      {multiline ? <textarea {...props} rows={10} /> : <input {...props} />}
     </label>
   );
 }
 
-function formFor(row) {
-  if (!row) return {};
-  const value = row.data || {};
-  if (row.kind === "message")
-    return {
-      role: value.role || "",
-      agent: value.agent || "",
-      modelID: value.modelID || value.model?.modelID || "",
-      providerID: value.providerID || value.model?.providerID || "",
-    };
-  return {
-    type: value.type || "",
-    text: value.text || "",
-    tool: value.tool || "",
-    callID: value.callID || "",
-    command: value.state?.input?.command || "",
-    input: value.state?.input ? JSON.stringify(value.state.input, null, 2) : "",
-    output: value.state?.output || "",
-    error: value.state?.error || "",
-    status: value.state?.status || "",
-    title: value.state?.title || "",
-    hash: value.hash || "",
-    files: Array.isArray(value.files) ? value.files.join("\n") : "",
-    metadata: value.metadata ? JSON.stringify(value.metadata, null, 2) : "",
-  };
+function replacePath(data, path, value) {
+  const next = structuredClone(data);
+  let target = next;
+  for (const key of path.slice(0, -1)) {
+    target[key] ??= {};
+    target = target[key];
+  }
+  target[path.at(-1)] = value;
+  return next;
 }
 
-export default function Inspector({
-  document,
+const Inspector = memo(function Inspector({
+  sessionTitle,
   selectedRow,
-  editing,
   busy,
   onChange,
   onClose,
   open,
   onAdd,
   onDelete,
+  onDirty,
 }) {
-  const [title, setTitle] = useState("");
-  const [text, setText] = useState("");
-  const [form, setForm] = useState({});
-  const [error, setError] = useState("");
-  useEffect(
-    () => setTitle(document?.session.title || ""),
-    [document?.session.title],
+  const incoming = useMemo(
+    () => JSON.stringify(selectedRow?.data ?? null),
+    [selectedRow?.data],
   );
+  const incomingTitle = sessionTitle || "";
+  const [base, setBase] = useState(incoming);
+  const [draft, setDraft] = useState(incoming);
+  const [titleBase, setTitleBase] = useState(incomingTitle);
+  const [title, setTitle] = useState(incomingTitle);
+  const [rawMode, setRawMode] = useState(false);
+  const [error, setError] = useState("");
+  const recordDirty = draft !== base;
+  const titleDirty = title !== titleBase;
+  const dirty = useRef(false);
+  dirty.current = recordDirty;
+
   useEffect(() => {
-    setText(selectedRow ? pretty(selectedRow.record) : "");
-    setForm(formFor(selectedRow));
-    setError("");
-  }, [selectedRow]);
-  const update = (key, value) =>
-    setForm((current) => ({ ...current, [key]: value }));
-  function structuredData() {
-    const original = selectedRow.data || {};
-    const next = { ...original, type: form.type || original.type };
-    if (selectedRow.kind === "message")
-      return {
-        ...next,
-        role: form.role,
-        agent: form.agent,
-        modelID: form.modelID,
-        providerID: form.providerID,
-      };
-    if (["text", "reasoning"].includes(next.type)) next.text = form.text;
-    if (next.type === "tool") {
-      next.tool = form.tool;
-      next.callID = form.callID;
-      next.state = {
-        ...(original.state || {}),
-        status: form.status || original.state?.status,
-        title: form.title,
-      };
-      try {
-        next.state.input = form.input ? JSON.parse(form.input) : {};
-      } catch {
-        throw new Error("Input JSON must be valid JSON");
-      }
-      if (form.command) next.state.input.command = form.command;
-      if (form.output !== undefined) next.state.output = form.output;
-      if (form.error !== undefined) next.state.error = form.error;
+    if (!dirty.current) {
+      setBase(incoming);
+      setDraft(incoming);
     }
-    if (next.type === "patch") {
-      next.hash = form.hash;
-      next.files = form.files.split("\n").filter(Boolean);
+  }, [incoming]);
+  useEffect(() => {
+    if (!titleDirty) {
+      setTitleBase(incomingTitle);
+      setTitle(incomingTitle);
     }
-    if (form.metadata) {
-      try {
-        next.metadata = JSON.parse(form.metadata);
-      } catch {
-        throw new Error("Metadata must be valid JSON");
-      }
-    }
-    return next;
-  }
-  function save() {
+  }, [incomingTitle, titleDirty]);
+  useEffect(() => {
+    onDirty(recordDirty || titleDirty);
+  }, [recordDirty, titleDirty, onDirty]);
+
+  const data = useMemo(() => {
     try {
-      if (!selectedRow) return;
-      const data = structuredData();
-      onChange(`${selectedRow.kind}.update`, {
+      return JSON.parse(draft);
+    } catch {
+      return null;
+    }
+  }, [draft]);
+  const disabled = busy || !selectedRow;
+
+  function update(path, value) {
+    setDraft(JSON.stringify(replacePath(data, path, value)));
+    setError("");
+  }
+
+  const field = (label, path, multiline = false) => {
+    const value = path.reduce((item, key) => item?.[key], data);
+    return (
+      <Field
+        key={label}
+        label={label}
+        value={value}
+        multiline={multiline}
+        disabled={disabled}
+        onChange={(next) => update(path, next)}
+      />
+    );
+  };
+
+  async function save() {
+    if (!selectedRow) return;
+    try {
+      const next = JSON.parse(draft);
+      if (!next || typeof next !== "object" || Array.isArray(next))
+        throw new Error("Record must be a JSON object");
+      const result = await onChange(`${selectedRow.kind}.update`, {
         [selectedRow.kind === "message" ? "messageId" : "partId"]:
           selectedRow.record.id,
-        data,
+        data: next,
+        before: JSON.parse(base),
       });
-      setText(JSON.stringify(data, null, 2));
-      setError("");
+      if (result) {
+        setBase(draft);
+        setError("");
+      }
     } catch (cause) {
       setError(cause.message);
     }
   }
-  const disabled = !editing || busy;
+
+  async function rename() {
+    const result = await onChange("session.rename", {
+      title,
+      before: titleBase,
+    });
+    if (result) setTitleBase(title);
+  }
+
+  const changedElsewhere = recordDirty && incoming !== base;
+  const hasFields =
+    selectedRow?.kind === "message" ||
+    ["text", "reasoning", "tool", "patch", "file"].includes(data?.type);
+
   return (
     <aside
       id="inspector"
@@ -136,11 +142,11 @@ export default function Inspector({
       <div className="inspector-head">
         <div className="panel-heading">
           <h3>
-            {selectedRow
-              ? selectedRow.kind === "part"
-                ? "Part"
-                : "Message"
-              : "Inspector"}
+            {selectedRow?.kind === "part"
+              ? "Part"
+              : selectedRow
+                ? "Message"
+                : "Inspector"}
           </h3>
           <button
             className="button inspector-close"
@@ -157,161 +163,172 @@ export default function Inspector({
           label="Session title"
           value={title}
           onChange={setTitle}
-          disabled={disabled}
+          disabled={busy || sessionTitle === undefined}
         />
         <div className="actions">
           <button
             className="button"
-            disabled={disabled}
-            onClick={() => onChange("session.rename", { title })}
+            disabled={busy || sessionTitle === undefined || !titleDirty}
+            onClick={rename}
           >
             Rename
           </button>
           <button
             className="button"
-            disabled={disabled}
+            disabled={busy || sessionTitle === undefined}
             onClick={() => onAdd("message")}
           >
             Add message
           </button>
           <button
             className="button"
-            disabled={disabled || !selectedRow}
+            disabled={disabled}
             onClick={() => onAdd("part")}
           >
             Add part
           </button>
         </div>
-        {selectedRow?.kind === "message" ? (
+        {selectedRow ? (
           <>
-            <Field
-              label="Role"
-              value={form.role}
-              onChange={(value) => update("role", value)}
-              disabled={disabled}
-            />
-            <Field
-              label="Agent"
-              value={form.agent}
-              onChange={(value) => update("agent", value)}
-              disabled={disabled}
-            />
-            <Field
-              label="Provider ID"
-              value={form.providerID}
-              onChange={(value) => update("providerID", value)}
-              disabled={disabled}
-            />
-            <Field
-              label="Model ID"
-              value={form.modelID}
-              onChange={(value) => update("modelID", value)}
-              disabled={disabled}
-            />
+            <div className="actions">
+              <button
+                className="button"
+                aria-pressed={!rawMode}
+                onClick={() => {
+                  try {
+                    JSON.parse(draft);
+                    setRawMode(false);
+                    setError("");
+                  } catch {
+                    setError("Fix invalid JSON before switching to fields.");
+                  }
+                }}
+              >
+                Fields
+              </button>
+              <button
+                className="button"
+                aria-pressed={rawMode}
+                onClick={() => {
+                  setRawMode(true);
+                  try {
+                    setDraft(JSON.stringify(JSON.parse(draft), null, 2));
+                  } catch {}
+                }}
+              >
+                Advanced JSON
+              </button>
+            </div>
+            {changedElsewhere ? (
+              <p className="hint error" role="alert">
+                OpenCode changed this record. Your draft is preserved; reload
+                the record before saving.
+              </p>
+            ) : null}
+            {rawMode || !hasFields ? (
+              <Field
+                label="Raw JSON"
+                value={draft}
+                onChange={setDraft}
+                disabled={disabled}
+                multiline
+              />
+            ) : (
+              <>
+                {selectedRow.kind === "message" ? (
+                  <>
+                    <p className="hint">
+                      {data?.role} message metadata. Select a text part to edit
+                      the message content.
+                    </p>
+                    {field("Agent", ["agent"])}
+                    {field(
+                      "Provider ID",
+                      data?.role === "user"
+                        ? ["model", "providerID"]
+                        : ["providerID"],
+                    )}
+                    {field(
+                      "Model ID",
+                      data?.role === "user"
+                        ? ["model", "modelID"]
+                        : ["modelID"],
+                    )}
+                  </>
+                ) : null}
+                {["text", "reasoning"].includes(data?.type)
+                  ? field(
+                      data.type === "text" ? "Text" : "Thinking trace",
+                      ["text"],
+                      true,
+                    )
+                  : null}
+                {data?.type === "tool" ? (
+                  <>
+                    {field("Tool", ["tool"])}
+                    {field("Call ID", ["callID"])}
+                    {typeof data.state?.input?.command === "string"
+                      ? field("Command", ["state", "input", "command"], true)
+                      : null}
+                    {typeof data.state?.output === "string"
+                      ? field("Output", ["state", "output"], true)
+                      : null}
+                    {typeof data.state?.error === "string"
+                      ? field("Error", ["state", "error"], true)
+                      : null}
+                    {field("Tool title", ["state", "title"])}
+                    <p className="hint">
+                      Status: {data.state?.status}. Other input fields and
+                      status are editable in Advanced JSON.
+                    </p>
+                  </>
+                ) : null}
+                {data?.type === "patch" ? (
+                  <>
+                    {field("Patch hash", ["hash"])}
+                    <Field
+                      label="Files (one per line)"
+                      value={data.files?.join("\n") || ""}
+                      disabled={disabled}
+                      multiline
+                      onChange={(value) =>
+                        update(["files"], value.split("\n").filter(Boolean))
+                      }
+                    />
+                  </>
+                ) : null}
+                {data?.type === "file" ? (
+                  <>
+                    {field("Filename", ["filename"])}
+                    {field("MIME type", ["mime"])}
+                    {field("URL", ["url"], true)}
+                  </>
+                ) : null}
+              </>
+            )}
+            <div className="hint">
+              {selectedRow.type === "reasoning"
+                ? "Provider signatures/encrypted metadata are preserved. Changing text does not re-sign reasoning."
+                : "Save writes this record directly to OpenCode. Recorded commands are never executed."}
+            </div>
+            {recordDirty ? (
+              <button
+                className="button"
+                onClick={() => {
+                  setBase(incoming);
+                  setDraft(incoming);
+                  setError("");
+                }}
+              >
+                Discard draft / reload record
+              </button>
+            ) : null}
           </>
-        ) : null}
-        {selectedRow?.kind === "part" && selectedRow.type === "text" ? (
-          <Field
-            label="Text"
-            value={form.text}
-            onChange={(value) => update("text", value)}
-            disabled={disabled}
-            multiline
-          />
-        ) : null}
-        {selectedRow?.kind === "part" && selectedRow.type === "reasoning" ? (
-          <Field
-            label="Thinking trace"
-            value={form.text}
-            onChange={(value) => update("text", value)}
-            disabled={disabled}
-            multiline
-          />
-        ) : null}
-        {selectedRow?.kind === "part" && selectedRow.type === "tool" ? (
-          <>
-            <Field
-              label="Tool"
-              value={form.tool}
-              onChange={(value) => update("tool", value)}
-              disabled={disabled}
-            />
-            <Field
-              label="Call ID"
-              value={form.callID}
-              onChange={(value) => update("callID", value)}
-              disabled={disabled}
-            />
-            <Field
-              label="Command"
-              value={form.command}
-              onChange={(value) => update("command", value)}
-              disabled={disabled}
-              multiline
-            />
-            <Field
-              label="Input JSON"
-              value={form.input}
-              onChange={(value) => update("input", value)}
-              disabled={disabled}
-              multiline
-            />
-            <Field
-              label="Output"
-              value={form.output}
-              onChange={(value) => update("output", value)}
-              disabled={disabled}
-              multiline
-            />
-            <Field
-              label="Error"
-              value={form.error}
-              onChange={(value) => update("error", value)}
-              disabled={disabled}
-              multiline
-            />
-            <Field
-              label="Status"
-              value={form.status}
-              onChange={(value) => update("status", value)}
-              disabled={disabled}
-            />
-          </>
-        ) : null}
-        {selectedRow?.kind === "part" && selectedRow.type === "patch" ? (
-          <>
-            <Field
-              label="Patch hash"
-              value={form.hash}
-              onChange={(value) => update("hash", value)}
-              disabled={disabled}
-            />
-            <Field
-              label="Files"
-              value={form.files}
-              onChange={(value) => update("files", value)}
-              disabled={disabled}
-              multiline
-            />
-          </>
-        ) : null}
-        <details className="raw-editor">
-          <summary>Advanced raw JSON</summary>
-          <textarea
-            id="record-json"
-            className="editor"
-            spellCheck={false}
-            readOnly={disabled}
-            disabled={!selectedRow}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-          />
-        </details>
-        <div className="hint">
-          {selectedRow?.type === "reasoning"
-            ? "Reasoning may contain provider signatures or encrypted metadata."
-            : "Changes are staged until Apply. Recorded commands are never executed by the editor."}
-        </div>
+        ) : (
+          <p className="hint">
+            Select a record in the timeline to edit it directly.
+          </p>
+        )}
         {error ? (
           <p className="error" role="alert">
             {error}
@@ -321,14 +338,14 @@ export default function Inspector({
       <div className="footer">
         <button
           className="button primary"
-          disabled={!selectedRow || disabled}
+          disabled={disabled || !recordDirty}
           onClick={save}
         >
           Save selected
         </button>
         <button
           className="button danger"
-          disabled={!selectedRow || disabled}
+          disabled={disabled || recordDirty}
           onClick={onDelete}
         >
           Delete selected
@@ -336,4 +353,6 @@ export default function Inspector({
       </div>
     </aside>
   );
-}
+});
+
+export default Inspector;

@@ -3,12 +3,11 @@ import {
   memo,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
 import { Virtuoso } from "react-virtuoso";
-import { findMatches, rowPreview, timelineRows } from "./timeline-data.js";
+import { findMatches, rowPreview } from "./timeline-data.js";
 
 const Scroller = forwardRef(function Scroller(props, ref) {
   return (
@@ -26,6 +25,8 @@ const Scroller = forwardRef(function Scroller(props, ref) {
 const components = { Scroller };
 const computeItemKey = (_, row) => row.key;
 const followOutput = (atBottom) => (atBottom ? "auto" : false);
+const overscan = { top: 400, bottom: 400 };
+const listStyle = { height: "100%", minHeight: 0 };
 
 const TimelineRow = memo(function TimelineRow({
   row,
@@ -80,18 +81,24 @@ const TimelineRow = memo(function TimelineRow({
   );
 });
 
-export default function Timeline({ document, selected, onSelect }) {
+const Timeline = memo(function Timeline({
+  rows,
+  messageCount,
+  selected,
+  onSelect,
+}) {
   const list = useRef(null);
-  const rows = useMemo(() => timelineRows(document), [document]);
   const [query, setQuery] = useState("");
   const [result, setResult] = useState({ query: "", matches: [] });
   const [matchPosition, setMatchPosition] = useState(0);
   const [searching, setSearching] = useState(false);
+  const searchAnchor = useRef({ term: "", key: null });
 
   useEffect(() => {
     const controller = new AbortController();
     const term = query.trim();
     if (!term) {
+      searchAnchor.current = { term: "", key: null };
       setResult({ query: "", matches: [] });
       setSearching(false);
       return () => controller.abort();
@@ -102,9 +109,17 @@ export default function Timeline({ document, selected, onSelect }) {
         const matches = await findMatches(rows, term, controller.signal);
         if (controller.signal.aborted) return;
         setResult({ query: term, matches });
-        setMatchPosition(0);
+        const sameTerm = searchAnchor.current.term === term;
+        const kept = sameTerm
+          ? matches.findIndex(
+              (index) => rows[index].key === searchAnchor.current.key,
+            )
+          : -1;
+        const position = Math.max(0, kept);
+        setMatchPosition(position);
+        searchAnchor.current = { term, key: rows[matches[position]]?.key };
         setSearching(false);
-        if (matches.length)
+        if (matches.length && !sameTerm)
           list.current?.scrollToIndex({
             index: matches[0],
             align: "center",
@@ -126,6 +141,7 @@ export default function Timeline({ document, selected, onSelect }) {
       (matchPosition + direction + result.matches.length) %
       result.matches.length;
     setMatchPosition(next);
+    searchAnchor.current.key = rows[result.matches[next]]?.key;
     list.current?.scrollToIndex({
       index: result.matches[next],
       align: "center",
@@ -133,6 +149,10 @@ export default function Timeline({ document, selected, onSelect }) {
     });
   };
   const activeMatch = result.matches[matchPosition];
+  const initialPosition = useRef({
+    index: Math.max(0, rows.length - 1),
+    align: "end",
+  });
   const renderRow = useCallback(
     (index, row) => (
       <TimelineRow
@@ -187,7 +207,7 @@ export default function Timeline({ document, selected, onSelect }) {
               ? result.matches.length
                 ? `${matchPosition + 1} / ${result.matches.length}`
                 : "No matches"
-              : `${document.messages.length} messages`}
+              : `${messageCount} messages`}
         </output>
         <button
           className="button"
@@ -209,15 +229,17 @@ export default function Timeline({ document, selected, onSelect }) {
           data={rows}
           components={components}
           computeItemKey={computeItemKey}
-          initialTopMostItemIndex={{ index: rows.length - 1, align: "end" }}
+          initialTopMostItemIndex={initialPosition.current}
           followOutput={followOutput}
-          increaseViewportBy={{ top: 400, bottom: 400 }}
+          increaseViewportBy={overscan}
           itemContent={renderRow}
-          style={{ height: "100%", minHeight: 0 }}
+          style={listStyle}
         />
       ) : (
         <div className="empty">This session has no messages yet.</div>
       )}
     </section>
   );
-}
+});
+
+export default Timeline;

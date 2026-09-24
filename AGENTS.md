@@ -2,6 +2,24 @@
 
 ## Product mission
 
+### Current interaction contract
+
+The user has replaced staged editing with direct saving. Selecting a record
+enables its fields immediately; Save selected writes that record transactionally.
+Do not require Start editing, workspace creation, or Apply in the browser.
+Do not create backups. Keep local unsaved drafts while the timeline live-syncs,
+and reject a save if the record's source payload differs from the draft's base.
+Older workspace architecture notes below describe legacy endpoints only.
+Keep source formatted with Prettier/gofmt and do not add explanatory code comments.
+
+Apply the relevant Vercel React performance rules: keep unchanged poll responses
+referentially stable, derive shared timeline rows once, memoize measured expensive
+boundaries with stable props, cancel obsolete requests/searches, and keep user
+confirmations in event handlers rather than state updaters. Verify live draft
+preservation along with idle resource usage; DOM node counts alone are not proof
+of a responsive page. Use agent-browser CLI for browser checks and close test
+sessions when finished.
+
 This product is a browser-based editor for OpenCode sessions. Its core value is
 that users can directly inspect and modify the persisted session, not merely
 search or view it.

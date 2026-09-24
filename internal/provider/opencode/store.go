@@ -14,7 +14,7 @@ import (
 	"opencode-session-editor/internal/domain"
 )
 
-var ErrConflict = errors.New("source session changed since editing began; reload before applying")
+var ErrConflict = errors.New("OpenCode changed this record; your draft is preserved. Reload the record before saving")
 
 type Store struct {
 	db   *sql.DB
@@ -91,11 +91,29 @@ func read(ctx context.Context, q queryer, id string) (domain.Document, error) {
 	if err := rows.Close(); err != nil {
 		return document, err
 	}
+	indices := make(map[string]int, len(messages))
 	for i := range messages {
-		messages[i].Parts, err = readParts(ctx, q, messages[i].ID, id)
-		if err != nil {
+		indices[messages[i].ID] = i
+		messages[i].Parts = []domain.Part{}
+	}
+	parts, err := q.QueryContext(ctx, `SELECT id,message_id,session_id,time_created,data FROM part WHERE session_id=? ORDER BY rowid,id`, id)
+	if err != nil {
+		return document, err
+	}
+	defer parts.Close()
+	for parts.Next() {
+		var part domain.Part
+		var raw string
+		if err := parts.Scan(&part.ID, &part.MessageID, &part.SessionID, &part.Time, &raw); err != nil {
 			return document, err
 		}
+		part.Data = json.RawMessage(raw)
+		if index, exists := indices[part.MessageID]; exists {
+			messages[index].Parts = append(messages[index].Parts, part)
+		}
+	}
+	if err := parts.Err(); err != nil {
+		return document, err
 	}
 	document.Messages = messages
 	return document, nil
@@ -121,7 +139,12 @@ func readParts(ctx context.Context, q queryer, messageID, sessionID string) ([]d
 }
 
 func (s *Store) Read(ctx context.Context, id string) (domain.Document, error) {
-	return read(ctx, s.db, id)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return domain.Document{}, err
+	}
+	defer tx.Rollback()
+	return read(ctx, tx, id)
 }
 
 func (s *Store) Apply(ctx context.Context, base, next domain.Document) error {

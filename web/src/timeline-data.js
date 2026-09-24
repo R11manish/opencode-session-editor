@@ -41,10 +41,26 @@ export function timelineRows(document) {
   return rows;
 }
 
+const searchableData = new WeakMap();
+
+function searchData(data) {
+  if (!data || typeof data !== "object") {
+    const json = JSON.stringify(data) ?? "";
+    return { json, lower: json.toLowerCase() };
+  }
+  let entry = searchableData.get(data);
+  if (!entry) {
+    const json = JSON.stringify(data);
+    entry = { json, lower: json.toLowerCase() };
+    searchableData.set(data, entry);
+  }
+  return entry;
+}
+
 export function rowPreview(row, query = "") {
   if (query) {
-    const full = JSON.stringify(row.data);
-    const index = full.toLowerCase().indexOf(query.toLowerCase());
+    const { json: full, lower } = searchData(row.data);
+    const index = lower.indexOf(query.toLowerCase());
     if (index >= 0) {
       const start = Math.max(0, index - 70);
       return `${start ? "…" : ""}${full.slice(start, start + 480)}${full.length > start + 480 ? "…" : ""}`;
@@ -84,9 +100,8 @@ export async function findMatches(rows, query, signal) {
       throw new DOMException("Search cancelled", "AbortError");
     const row = rows[index];
     if (
-      `${row.role} ${row.record.id} ${JSON.stringify(row.data)}`
-        .toLowerCase()
-        .includes(term)
+      `${row.role} ${row.record.id}`.toLowerCase().includes(term) ||
+      searchData(row.data).lower.includes(term)
     ) {
       matches.push(index);
     }

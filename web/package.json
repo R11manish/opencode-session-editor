@@ -2,7 +2,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "test": "node --test src/*.test.js",
+    "format": "prettier --write src index.html vite.config.js package.json",
+    "format:check": "prettier --check src index.html vite.config.js package.json"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

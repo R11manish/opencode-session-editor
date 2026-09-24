@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,7 +101,7 @@ INSERT INTO part VALUES ('prt_1','msg_1','ses_1',1,1,'{"type":"text","text":"bef
 		t.Fatal(err)
 	}
 	err = store.Apply(context.Background(), base, base)
-	if err == nil || !strings.Contains(err.Error(), "reload") {
+	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected conflict, got %v", err)
 	}
 }
