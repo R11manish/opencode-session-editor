@@ -24,6 +24,10 @@ func New(store *opencode.Store, work *workspace.Store, page []byte) *API {
 	return &API{store: store, work: work, page: page}
 }
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/favicon.ico" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.URL.Path == "/" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(a.page)
