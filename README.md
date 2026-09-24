@@ -12,12 +12,37 @@ return HTTP 304. Polls stop in hidden tabs and are cancelled on session changes.
 Unsaved drafts are preserved while the timeline updates. Saves reject records
 changed by OpenCode since the draft began, instead of overwriting newer content.
 
-## Run
+## Install from the private GitHub repository
+
+The repository is private, so authenticate with GitHub first:
+
+```sh
+gh auth login
+```
+
+Then clone and install:
+
+```sh
+git clone https://github.com/R11manish/opencode-session-editor.git
+cd opencode-session-editor
+./install.sh
+```
+
+The installer places the executable and production web assets under
+`~/.local/bin`. Ensure `~/.local/bin` is on your `PATH`.
+
+## Run from source
 
 ```sh
 npm --prefix web ci
 npm --prefix web run build
 go run . --db ~/.local/share/opencode/opencode.db
+```
+
+## Run the installed binary
+
+```sh
+opencode-session-editor
 ```
 
 Open `http://127.0.0.1:8787`.
