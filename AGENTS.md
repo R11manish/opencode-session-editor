@@ -69,14 +69,14 @@ default safety mode for browsing and staging, not a product limitation.
 
 Before applying any mutation:
 
-- create a backup or verified snapshot
+- require explicit user-approved recovery strategy when needed
 - record the operation in the application journal
 - show the affected record count
 - show a before/after diff when practical
 - require confirmation for delete, truncate, overwrite, and apply operations
 
-Support undo, redo, and revert at the workspace level. A database backup is the
-last-resort recovery mechanism, not the only undo mechanism.
+Support undo, redo, and revert at the workspace level. Do not create database
+backups automatically during Apply.
 
 ### 4. Preserve the OpenCode data model
 
@@ -267,7 +267,7 @@ Applying changes to OpenCode should be transactional:
 
 1. Lock the editor operation.
 2. Confirm the source database still matches the workspace base snapshot.
-3. Create a timestamped SQLite backup or use a verified SQLite backup API.
+3. Do not create a database backup automatically.
 4. Validate the complete edited session.
 5. Start a database transaction.
 6. Apply session, message, part, and related updates in dependency order.
