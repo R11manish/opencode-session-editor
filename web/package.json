@@ -6,9 +6,12 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
     "react": "latest",
-    "react-dom": "latest"
+    "react-dom": "latest",
+    "react-virtuoso": "4.18.15",
+    "vite": "latest"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "prettier": "3.9.9"
+  }
 }
