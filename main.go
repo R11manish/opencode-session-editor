@@ -34,14 +34,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	page, err := os.ReadFile(filepath.Join(filepath.Dir(executable), "web", "index.html"))
+	dist := filepath.Join(filepath.Dir(executable), "web", "dist")
+	page, err := os.ReadFile(filepath.Join(dist, "index.html"))
 	if err != nil {
-		page, err = os.ReadFile(filepath.Join("web", "index.html"))
+		dist = filepath.Join("web", "dist")
+		page, err = os.ReadFile(filepath.Join(dist, "index.html"))
 	}
 	if err != nil {
 		log.Fatal(err)
 	}
-	api := httpapi.New(store, workspace.New(), page)
+	api := httpapi.New(store, workspace.New(), page, filepath.Join(dist, "assets"))
 	log.Printf("Session Editor at http://%s (database: %s)", *addr, *path)
 	log.Fatal(http.ListenAndServe(*addr, api))
 }

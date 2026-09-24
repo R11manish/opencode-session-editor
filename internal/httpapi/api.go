@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,13 +17,14 @@ import (
 )
 
 type API struct {
-	store *opencode.Store
-	work  *workspace.Store
-	page  []byte
+	store  *opencode.Store
+	work   *workspace.Store
+	page   []byte
+	assets string
 }
 
-func New(store *opencode.Store, work *workspace.Store, page []byte) *API {
-	return &API{store: store, work: work, page: page}
+func New(store *opencode.Store, work *workspace.Store, page []byte, assets string) *API {
+	return &API{store: store, work: work, page: page, assets: assets}
 }
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/favicon.ico" {
@@ -31,6 +34,23 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(a.page)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/assets/") {
+		name := filepath.Base(r.URL.Path)
+		data, err := os.ReadFile(filepath.Join(a.assets, name))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		contentType := "application/octet-stream"
+		if strings.HasSuffix(name, ".js") {
+			contentType = "application/javascript; charset=utf-8"
+		} else if strings.HasSuffix(name, ".css") {
+			contentType = "text/css; charset=utf-8"
+		}
+		w.Header().Set("Content-Type", contentType)
+		w.Write(data)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
