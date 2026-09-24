@@ -253,7 +253,7 @@ func (a *API) apply(w http.ResponseWriter, r *http.Request) {
 		failStatus(w, 400, errors.New("workspace not found"))
 		return
 	}
-	backup, err := a.store.Apply(r.Context(), base, next)
+	err := a.store.Apply(r.Context(), base, next)
 	if err != nil {
 		if errors.Is(err, opencode.ErrConflict) {
 			failStatus(w, 409, err)
@@ -268,7 +268,7 @@ func (a *API) apply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.work.Finish(id, applied)
-	write(w, 200, map[string]any{"ok": true, "backup": backup, "document": applied})
+	write(w, 200, map[string]any{"ok": true, "document": applied})
 }
 func decode(r *http.Request, v any) error {
 	return json.NewDecoder(io.LimitReader(r.Body, 20<<20)).Decode(v)

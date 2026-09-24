@@ -358,6 +358,46 @@ button {
   font-size: 12px;
 }
 
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.field-textarea {
+  width: 100%;
+  padding: 8px 9px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  outline: none;
+  background: #0e1219;
+  color: var(--text);
+  font:
+    12px/1.5 ui-monospace,
+    SFMono-Regular,
+    monospace;
+}
+
+.raw-editor {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.raw-editor summary {
+  padding: 9px 10px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.raw-editor .editor {
+  width: calc(100% - 16px);
+  margin: 0 8px 8px;
+}
+
 .input {
   width: 100%;
   padding: 8px 9px;

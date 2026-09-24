@@ -120,15 +120,11 @@ export default function App() {
     );
 
   async function apply() {
-    if (
-      !window.confirm(
-        "Apply staged changes to the OpenCode database? A backup will be created first.",
-      )
-    )
+    if (!window.confirm("Apply staged changes to the OpenCode database?"))
       return;
     const body = await perform(
       () => post(`/api/apply?sessionId=${encodeURIComponent(sessionId)}`),
-      (result) => `Applied. Backup: ${result.backup}`,
+      "Applied.",
     );
     if (body) {
       setEditing(false);

@@ -124,46 +124,42 @@ func (s *Store) Read(ctx context.Context, id string) (domain.Document, error) {
 	return read(ctx, s.db, id)
 }
 
-func (s *Store) Apply(ctx context.Context, base, next domain.Document) (string, error) {
+func (s *Store) Apply(ctx context.Context, base, next domain.Document) error {
 	if base.Session.ID != next.Session.ID {
-		return "", errors.New("session ID cannot be changed")
+		return errors.New("session ID cannot be changed")
 	}
 	if err := domain.Validate(next); err != nil {
-		return "", err
+		return err
 	}
 	current, err := s.Read(ctx, base.Session.ID)
 	if err != nil {
-		return "", err
+		return err
 	}
 	if !sameSource(current, base) {
-		return "", ErrConflict
-	}
-	backup := fmt.Sprintf("%s.session-editor-%d.bak", s.path, time.Now().UnixNano())
-	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", backup); err != nil {
-		return "", err
+		return ErrConflict
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return backup, err
+		return err
 	}
 	defer tx.Rollback()
 	current, err = read(ctx, tx, base.Session.ID)
 	if err != nil {
-		return backup, err
+		return err
 	}
 	if !sameSource(current, base) {
-		return backup, ErrConflict
+		return ErrConflict
 	}
 	if err := applySession(ctx, tx, base, next); err != nil {
-		return backup, err
+		return err
 	}
 	if err := applyMessages(ctx, tx, base, next); err != nil {
-		return backup, err
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return backup, err
+		return err
 	}
-	return backup, nil
+	return nil
 }
 
 func applySession(ctx context.Context, tx *sql.Tx, base, next domain.Document) error {

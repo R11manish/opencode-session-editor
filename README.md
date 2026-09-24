@@ -5,7 +5,7 @@ A local browser-based editor for OpenCode sessions.
 It can inspect and stage edits to session titles, user and assistant messages,
 reasoning traces, tool calls, tool outputs, and other persisted parts. Changes
 are applied explicitly to the OpenCode SQLite database after validation and an
-automatic backup.
+explicitly to the OpenCode SQLite database.
 
 ## Run
 

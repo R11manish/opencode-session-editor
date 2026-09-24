@@ -50,12 +50,18 @@ CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT NOT NULL, session_id TEX
 	next.Messages[0].Parts[0].Data = json.RawMessage(`{"type":"text","text":"edited"}`)
 	next.Messages[0].Parts = append(next.Messages[0].Parts, domain.Part{ID: "prt_2", MessageID: "msg_1", SessionID: "ses_1", Time: 2, Data: json.RawMessage(`{"type":"tool","tool":"bash","state":{"status":"completed"}}`)})
 	next.Messages = append(next.Messages, domain.Message{ID: "msg_2", SessionID: "ses_1", Time: 3, Data: json.RawMessage(`{"role":"assistant","time":{"created":3}}`), Parts: []domain.Part{{ID: "prt_3", MessageID: "msg_2", SessionID: "ses_1", Time: 3, Data: json.RawMessage(`{"type":"text","text":"new"}`)}}})
-	backup, err := store.Apply(context.Background(), base, next)
+	err = store.Apply(context.Background(), base, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(backup); err != nil {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
 		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".bak") {
+			t.Fatalf("unexpected backup: %s", entry.Name())
+		}
 	}
 	got, err := store.Read(context.Background(), "ses_1")
 	if err != nil {
@@ -93,7 +99,7 @@ INSERT INTO part VALUES ('prt_1','msg_1','ses_1',1,1,'{"type":"text","text":"bef
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.Apply(context.Background(), base, base)
+	err = store.Apply(context.Background(), base, base)
 	if err == nil || !strings.Contains(err.Error(), "reload") {
 		t.Fatalf("expected conflict, got %v", err)
 	}
