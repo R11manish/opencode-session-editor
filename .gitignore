@@ -1,0 +1,6 @@
+/opencode-session-editor
+*.db
+*.db-shm
+*.db-wal
+*.bak
+.DS_Store
